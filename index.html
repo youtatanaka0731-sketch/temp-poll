@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>教室温度メーター</title>
+<style>
+  :root {
+    --ink: #2A2F36;
+    --muted: #8A929C;
+    --bg: #F4F6F8;
+    --card: #FFFFFF;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Hiragino Maru Gothic ProN", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 16px 12px 32px;
+  }
+  .wrap { width: 100%; max-width: 420px; }
+  .head { text-align: center; margin-bottom: 14px; }
+  .head .eyebrow { font-size: 13px; letter-spacing: .2em; color: var(--muted); font-weight: 600; }
+  .head h1 { font-size: 24px; font-weight: 800; margin-top: 4px; }
+  .card {
+    background: var(--card); border-radius: 14px; padding: 12px 16px;
+    margin-bottom: 12px; box-shadow: 0 1px 3px rgba(20,30,40,.06);
+  }
+  .session { display: flex; justify-content: space-between; align-items: center; }
+  .session .title { font-size: 18px; font-weight: 800; }
+  .session .time { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 8px; }
+  .session .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .session .total { text-align: right; }
+  .session .total b { font-size: 22px; font-weight: 800; display: block; }
+  .session .total span { font-size: 11px; color: var(--muted); }
+  .alert {
+    border-radius: 14px; padding: 12px 16px; margin-bottom: 12px;
+    font-weight: 700; font-size: 14px; display: flex; gap: 10px; align-items: center;
+    animation: pulseIn .3s ease, shimmer 2s ease infinite;
+  }
+  .alert .emoji { font-size: 22px; }
+  .spectrum {
+    display: flex; height: 10px; border-radius: 5px; overflow: hidden;
+    margin-bottom: 14px; background: #E6EAEE;
+  }
+  .spectrum div { transition: width .4s ease; }
+  .choices { display: flex; flex-direction: column; gap: 10px; }
+  button.choice {
+    position: relative; overflow: hidden; text-align: left;
+    border: 2px solid transparent; background: var(--card); border-radius: 14px;
+    padding: 14px 16px; cursor: pointer; font-family: inherit;
+    box-shadow: 0 1px 3px rgba(20,30,40,.06);
+    transition: border-color .15s, box-shadow .15s, opacity .2s;
+    width: 100%;
+  }
+  button.choice:disabled { cursor: default; opacity: .5; }
+  button.choice .fill {
+    position: absolute; inset: 0; width: 0%; transition: width .4s ease;
+  }
+  button.choice .row {
+    position: relative; display: flex; justify-content: space-between; align-items: center;
+  }
+  button.choice .label {
+    font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 10px;
+  }
+  button.choice .label .emoji { font-size: 20px; }
+  button.choice .mine {
+    font-size: 10px; font-weight: 700; color: #fff; border-radius: 999px;
+    padding: 2px 8px; display: none;
+  }
+  button.choice.selected .mine { display: inline; }
+  button.choice .count { font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  button.choice .count small { font-size: 11px; font-weight: 500; color: var(--muted); margin-left: 2px; }
+  .foot {
+    margin-top: 16px; font-size: 11.5px; color: #9AA2AC; line-height: 1.7; text-align: center;
+  }
+  .error { margin-top: 10px; font-size: 13px; color: #C2401F; text-align: center; display: none; }
+  .closed { font-size: 14px; color: var(--muted); padding: 4px 0; }
+  @keyframes pulseIn { from { transform: scale(.97); opacity: 0 } to { transform: scale(1); opacity: 1 } }
+  @keyframes shimmer { 0%,100% { box-shadow: 0 0 0 0 rgba(0,0,0,0) } 50% { box-shadow: 0 0 0 6px rgba(0,0,0,.04) } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div class="eyebrow">みんなで決める教室の温度</div>
+    <h1>🌡 教室温度メーター</h1>
+  </div>
+
+  <div class="card session" id="sessionCard">
+    <div class="closed">読み込み中…</div>
+  </div>
+
+  <div class="alert" id="alertBanner" style="display:none">
+    <span class="emoji" id="alertEmoji"></span>
+    <span id="alertText"></span>
+  </div>
+
+  <div class="spectrum" id="spectrum" style="display:none"></div>
+
+  <div class="choices" id="choices"></div>
+
+  <div class="error" id="errorBox"></div>
+
+  <div class="foot">
+    回答は匿名・リアルタイムで反映されます<br>
+    同じ選択肢をもう一度タップすると取り消せます<br>
+    授業終了(時限の切り替わり)で結果は自動リセットされます
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getDatabase, ref, onValue, set, remove, off } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+// ================================================================
+// ★★★ ここにFirebaseの設定を貼り付ける(手順書 STEP 3 参照) ★★★
+// ================================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyAaxTnyEG3cqRUv8AJUOqOzk9KvIC6u-4M",
+  authDomain: "classroom-temp-5619c.firebaseapp.com",
+  databaseURL: "https://classroom-temp-5619c-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "classroom-temp-5619c",
+  storageBucket: "classroom-temp-5619c.firebasestorage.app",
+  messagingSenderId: "1028059965990",
+  appId: "1:1028059965990:web:5c0e463f0ceffa8cd094e7"};
+// ================================================================
+
+// ---- 設定 ----
+const ALERT_THRESHOLD = 5; // 「暑すぎる」or「寒すぎる」がこの人数以上でアラート表示
+const PERIODS = [
+  { n: 1, label: "1限", start: 8 * 60 + 30, end: 10 * 60 + 15 },
+  { n: 2, label: "2限", start: 10 * 60 + 25, end: 12 * 60 + 10 },
+  { n: 3, label: "3限", start: 13 * 60, end: 14 * 60 + 45 },
+  { n: 4, label: "4限", start: 14 * 60 + 55, end: 16 * 60 + 40 },
+  { n: 5, label: "5限", start: 16 * 60 + 50, end: 18 * 60 + 35 },
+];
+const CHOICES = [
+  { id: "hot2", label: "暑すぎる", emoji: "🥵", color: "#E2502B", bg: "#FDEEE9" },
+  { id: "hot1", label: "少し暑い", emoji: "🌤", color: "#E8923A", bg: "#FCF3E7" },
+  { id: "just", label: "丁度良い", emoji: "😌", color: "#2FA46A", bg: "#EAF7F0" },
+  { id: "cold1", label: "少し寒い", emoji: "🍃", color: "#4F95D9", bg: "#EBF3FB" },
+  { id: "cold2", label: "寒すぎる", emoji: "🥶", color: "#2B55C9", bg: "#EAEFFB" },
+];
+
+// ---- 匿名の端末ID(localStorageに保持→リロードしても同一人物として扱う) ----
+function getVoterId() {
+  try {
+    let id = localStorage.getItem("tempvote_id");
+    if (!id) {
+      id = Math.random().toString(36).slice(2, 12);
+      localStorage.setItem("tempvote_id", id);
+    }
+    return id;
+  } catch (e) {
+    return Math.random().toString(36).slice(2, 12); // プライベートモード等の保険
+  }
+}
+const voterId = getVoterId();
+
+// ---- 時限判定 ----
+function minutesToStr(m) {
+  return Math.floor(m / 60) + ":" + String(m % 60).padStart(2, "0");
+}
+function localDateStr(d) {
+  return d.getFullYear() +
+    String(d.getMonth() + 1).padStart(2, "0") +
+    String(d.getDate()).padStart(2, "0");
+}
+function getSession(now) {
+  const m = now.getHours() * 60 + now.getMinutes();
+  for (const p of PERIODS) {
+    if (m >= p.start && m <= p.end) return { period: p, status: "in", remain: p.end - m };
+  }
+  for (const p of PERIODS) {
+    if (m < p.start) return { period: p, status: "before", until: p.start - m };
+  }
+  return null;
+}
+
+// ---- Firebase初期化 ----
+let db = null;
+try {
+  if (firebaseConfig.apiKey === "ここに貼り付け") {
+    showError("Firebaseの設定が未入力です。手順書のSTEP 3を確認してください。");
+  } else {
+    const app = initializeApp(firebaseConfig);
+    db = getDatabase(app);
+  }
+} catch (e) {
+  showError("Firebaseの初期化に失敗しました。設定値を確認してください。");
+}
+
+// ---- 状態 ----
+let session = null;
+let sessionPath = null;
+let votesRef = null;
+let votes = {};   // { voterId: choiceId }
+let myVote = null;
+
+// ---- DOM構築 ----
+const choicesEl = document.getElementById("choices");
+const btns = {};
+for (const c of CHOICES) {
+  const b = document.createElement("button");
+  b.className = "choice";
+  b.id = "btn_" + c.id;
+  b.innerHTML = `
+    <div class="fill" style="background:${c.bg}"></div>
+    <div class="row">
+      <span class="label"><span class="emoji">${c.emoji}</span>${c.label}
+        <span class="mine" style="background:${c.color}">あなたの回答</span>
+      </span>
+      <span class="count" style="color:${c.color}"><span class="n">0</span><small>人</small></span>
+    </div>`;
+  b.addEventListener("click", () => vote(c.id));
+  choicesEl.appendChild(b);
+  btns[c.id] = b;
+}
+
+function showError(msg) {
+  const e = document.getElementById("errorBox");
+  e.textContent = msg;
+  e.style.display = "block";
+}
+function hideError() {
+  document.getElementById("errorBox").style.display = "none";
+}
+
+// ---- 投票 ----
+async function vote(choiceId) {
+  if (!db || !sessionPath) return;
+  hideError();
+  try {
+    const myRef = ref(db, sessionPath + "/" + voterId);
+    if (myVote === choiceId) {
+      await remove(myRef); // 取り消し
+    } else {
+      await set(myRef, choiceId);
+    }
+  } catch (e) {
+    showError("送信に失敗しました。電波状況を確認してもう一度タップしてください。");
+  }
+}
+
+// ---- 画面更新 ----
+function render() {
+  // セッションカード
+  const card = document.getElementById("sessionCard");
+  const counts = {};
+  let total = 0;
+  for (const v of Object.values(votes)) {
+    counts[v] = (counts[v] || 0) + 1;
+    total++;
+  }
+  myVote = votes[voterId] || null;
+
+  if (session) {
+    const p = session.period;
+    const sub = session.status === "in"
+      ? `授業中・終了まで約${session.remain}分(終了時に自動リセット)`
+      : `開始前・あと約${session.until}分(${p.label}の投票として集計)`;
+    card.innerHTML = `
+      <div>
+        <div class="title">${p.label}<span class="time">${minutesToStr(p.start)}〜${minutesToStr(p.end)}</span></div>
+        <div class="sub">${sub}</div>
+      </div>
+      <div class="total"><b>${total}</b><span>人が回答</span></div>`;
+  } else {
+    card.innerHTML = `<div class="closed">本日の授業は終了しました。投票は翌日の1限前(〜8:30)から再開します。</div>`;
+  }
+
+  // ボタン
+  for (const c of CHOICES) {
+    const n = counts[c.id] || 0;
+    const b = btns[c.id];
+    b.querySelector(".n").textContent = n;
+    b.querySelector(".fill").style.width = total > 0 ? (n / total * 100) + "%" : "0%";
+    b.disabled = !session || !db;
+    if (myVote === c.id) {
+      b.classList.add("selected");
+      b.style.borderColor = c.color;
+      b.style.boxShadow = `0 2px 8px ${c.color}30`;
+    } else {
+      b.classList.remove("selected");
+      b.style.borderColor = "transparent";
+      b.style.boxShadow = "";
+    }
+  }
+
+  // スペクトラムバー
+  const sp = document.getElementById("spectrum");
+  if (session && total > 0) {
+    sp.style.display = "flex";
+    sp.innerHTML = CHOICES
+      .map(c => {
+        const n = counts[c.id] || 0;
+        return n ? `<div style="width:${n / total * 100}%;background:${c.color}"></div>` : "";
+      }).join("");
+  } else {
+    sp.style.display = "none";
+  }
+
+  // アラート
+  const hot2 = counts.hot2 || 0, cold2 = counts.cold2 || 0;
+  const banner = document.getElementById("alertBanner");
+  let alert = null;
+  if (hot2 >= ALERT_THRESHOLD && hot2 > cold2) {
+    alert = { emoji: "🔥", text: `「暑すぎる」が${hot2}人になりました。空調を下げる相談をしてみては?`, color: "#C2401F", bg: "#FBE4DC" };
+  } else if (cold2 >= ALERT_THRESHOLD && cold2 > hot2) {
+    alert = { emoji: "❄️", text: `「寒すぎる」が${cold2}人になりました。空調を上げる相談をしてみては?`, color: "#1F3FA8", bg: "#DEE6FA" };
+  }
+  if (alert) {
+    banner.style.display = "flex";
+    banner.style.background = alert.bg;
+    banner.style.color = alert.color;
+    banner.style.border = `1.5px solid ${alert.color}33`;
+    document.getElementById("alertEmoji").textContent = alert.emoji;
+    document.getElementById("alertText").textContent = alert.text;
+  } else {
+    banner.style.display = "none";
+  }
+}
+
+// ---- セッション監視とFirebase購読 ----
+function subscribe() {
+  if (!db) { render(); return; }
+  const now = new Date();
+  const s = getSession(now);
+  const newPath = s ? `votes/${localDateStr(now)}/p${s.period.n}` : null;
+  if (newPath !== sessionPath) {
+    if (votesRef) off(votesRef);
+    votes = {};
+    sessionPath = newPath;
+    session = s;
+    if (newPath) {
+      votesRef = ref(db, newPath);
+      onValue(votesRef, (snap) => {
+        votes = snap.val() || {};
+        render();
+      }, () => {
+        showError("データの取得に失敗しました。データベースのルール設定を確認してください。");
+      });
+    } else {
+      votesRef = null;
+    }
+  } else {
+    session = s; // 残り時間表示の更新
+  }
+  render();
+}
+
+subscribe();
+setInterval(subscribe, 15000); // 15秒ごとに時限の切り替わりをチェック
+</script>
+</body>
+</html>
