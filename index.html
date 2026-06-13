@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>教室温度メーター</title>
+<title>さむあつメーター</title>
 <style>
   :root {
     --ink: #2A2F36;
@@ -87,8 +87,8 @@
 <body>
 <div class="wrap">
   <div class="head">
-    <div class="eyebrow">みんなで決める教室の温度</div>
-    <h1>🌡 教室温度メーター</h1>
+    <div class="eyebrow">みんなで決める教室の体感</div>
+    <h1>🌡 さむあつメーター</h1>
   </div>
 
   <div class="card session" id="sessionCard">
@@ -128,10 +128,11 @@ const firebaseConfig = {
   storageBucket: "classroom-temp-5619c.firebasestorage.app",
   messagingSenderId: "1028059965990",
   appId: "1:1028059965990:web:5c0e463f0ceffa8cd094e7"};
+};
 // ================================================================
 
 // ---- 設定 ----
-const ALERT_THRESHOLD = 5; // 「暑すぎる」or「寒すぎる」がこの人数以上でアラート表示
+const ALERT_THRESHOLD = 5; // 「暑い」or「寒い」がこの人数以上でアラート表示
 const PERIODS = [
   { n: 1, label: "1限", start: 8 * 60 + 30, end: 10 * 60 + 15 },
   { n: 2, label: "2限", start: 10 * 60 + 25, end: 12 * 60 + 10 },
@@ -140,11 +141,9 @@ const PERIODS = [
   { n: 5, label: "5限", start: 16 * 60 + 50, end: 18 * 60 + 35 },
 ];
 const CHOICES = [
-  { id: "hot2", label: "暑すぎる", emoji: "🥵", color: "#E2502B", bg: "#FDEEE9" },
-  { id: "hot1", label: "少し暑い", emoji: "🌤", color: "#E8923A", bg: "#FCF3E7" },
+  { id: "hot",  label: "暑い",    emoji: "🥵", color: "#E2502B", bg: "#FDEEE9" },
   { id: "just", label: "丁度良い", emoji: "😌", color: "#2FA46A", bg: "#EAF7F0" },
-  { id: "cold1", label: "少し寒い", emoji: "🍃", color: "#4F95D9", bg: "#EBF3FB" },
-  { id: "cold2", label: "寒すぎる", emoji: "🥶", color: "#2B55C9", bg: "#EAEFFB" },
+  { id: "cold", label: "寒い",    emoji: "🥶", color: "#2B55C9", bg: "#EAEFFB" },
 ];
 
 // ---- 匿名の端末ID(localStorageに保持→リロードしても同一人物として扱う) ----
@@ -306,13 +305,13 @@ function render() {
   }
 
   // アラート
-  const hot2 = counts.hot2 || 0, cold2 = counts.cold2 || 0;
+  const hot2 = counts.hot || 0, cold2 = counts.cold || 0;
   const banner = document.getElementById("alertBanner");
   let alert = null;
   if (hot2 >= ALERT_THRESHOLD && hot2 > cold2) {
-    alert = { emoji: "🔥", text: `「暑すぎる」が${hot2}人になりました。空調を下げる相談をしてみては?`, color: "#C2401F", bg: "#FBE4DC" };
+    alert = { emoji: "🔥", text: `「暑い」が${hot2}人になりました。空調を下げる相談をしてみては?`, color: "#C2401F", bg: "#FBE4DC" };
   } else if (cold2 >= ALERT_THRESHOLD && cold2 > hot2) {
-    alert = { emoji: "❄️", text: `「寒すぎる」が${cold2}人になりました。空調を上げる相談をしてみては?`, color: "#1F3FA8", bg: "#DEE6FA" };
+    alert = { emoji: "❄️", text: `「寒い」が${cold2}人になりました。空調を上げる相談をしてみては?`, color: "#1F3FA8", bg: "#DEE6FA" };
   }
   if (alert) {
     banner.style.display = "flex";
